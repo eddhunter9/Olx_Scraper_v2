@@ -1,5 +1,3 @@
-import re
-import time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -15,6 +13,11 @@ import re
 import requests
 from bs4 import BeautifulSoup
 
+from datetime import datetime
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+
 #MODUŁY
 from claude_to_csv import process_urls_to_xlsx
 from claude_to_csv import get_shop_name_from_url
@@ -22,7 +25,9 @@ from claude_to_csv import ctc_get_olx_ads_count
 from claude_to_csv import ctc_get_olx_ads_count_selenium
 
 # === KONFIGURACJA ===
-CATEGORY_URL = "https://www.olx.pl/elektronika/sprzet-audio/"
+#CATEGORY_URL = "https://www.olx.pl/elektronika/sprzet-audio/"
+#CATEGORY_URL = "https://www.olx.pl/dom-ogrod/instalacje/"
+CATEGORY_URL = "https://www.olx.pl/dla-firm/maszyny-i-urzadzenia/"
 MAX_PAGES    = 1
 
 # === INICJALIZACJA WEBDRIVERA ===
@@ -66,7 +71,9 @@ def get_shop_info_improved(listing_url):
                 shop_info['profile_url'] = profile_url
                 print(f"  ✓ Link do profilu: {profile_url}")
 
-                ads_count = get_olx_ads_count(profile_url)  # LICZBA OGLOSZEN
+                #Zmiana: podstawienie funkcji z claude_to_csv
+                #get_olx_ads_count nieaktywne
+                ads_count = ctc_get_olx_ads_count(profile_url)  # LICZBA OGLOSZEN
                 if ads_count is not None:
                     print(f"Liczba ogłoszeń: {ads_count}")
                 else:
@@ -189,43 +196,44 @@ HEADERS = {
     "Accept-Language": "pl-PL,pl;q=0.9"
 }
 
-def get_olx_ads_count(shop_url):
-    """
-    Pobiera liczbę ogłoszeń ze strony OLX - dla kont firmowych (*.olx.pl/home)
-    oraz profili użytkowników (/oferty/uzytkownik/...).
-    """
-    resp = requests.get(shop_url, headers=HEADERS)
-    if resp.status_code != 200:
-        print(f"Błąd pobierania {shop_url}: {resp.status_code}")
-        return None
-    html = resp.text
-    soup = BeautifulSoup(html, 'html.parser')
-
-    # 1) Spróbuj znaleźć element nagłówkowy z liczbą ogłoszeń
-    # dla firm: najczęściej pojawia się jako: "123 ogłoszeń" lub w przycisku
-    text_candidates = list(soup.stripped_strings)
-    for text in text_candidates:
-        # wzorzec: liczba + "ogłoszeń"
-        m = re.search(r"(\d+[\s\d]*)\s*ogłoszeń", text)
-        if m:
-            return int(m.group(1).replace(' ', ''))
-        # wzorzec: liczba + "ofert"
-        m2 = re.search(r"(\d+[\s\d]*)\s*ofert", text)
-        if m2:
-            return int(m2.group(1).replace(' ', ''))
-
-    # 2) Dla stron użytkowników: treść "Ogłoszenia użytkownika (123)"
-    m3 = re.search(r"Ogłoszenia użytkownika\s*\((\d+)\)", html)
-    if m3:
-        return int(m3.group(1))
-
-    # 3) Fallback: regex na całości HTML, łapiemy pierwsze wystąpienie
-    m4 = re.search(r"(\d+[\s\d]*)\s*(ogłoszeń|ofert)", html)
-    if m4:
-        return int(m4.group(1).replace(' ', ''))
-
-    print(f"Nie znaleziono liczby ogłoszeń dla: {shop_url}")
-    return None
+#Nieaktywne na rzecz ctc_get_olx_ads_count
+# def get_olx_ads_count(shop_url):
+#     """
+#     Pobiera liczbę ogłoszeń ze strony OLX - dla kont firmowych (*.olx.pl/home)
+#     oraz profili użytkowników (/oferty/uzytkownik/...).
+#     """
+#     resp = requests.get(shop_url, headers=HEADERS)
+#     if resp.status_code != 200:
+#         print(f"Błąd pobierania {shop_url}: {resp.status_code}")
+#         return None
+#     html = resp.text
+#     soup = BeautifulSoup(html, 'html.parser')
+#
+#     # 1) Spróbuj znaleźć element nagłówkowy z liczbą ogłoszeń
+#     # dla firm: najczęściej pojawia się jako: "123 ogłoszeń" lub w przycisku
+#     text_candidates = list(soup.stripped_strings)
+#     for text in text_candidates:
+#         # wzorzec: liczba + "ogłoszeń"
+#         m = re.search(r"(\d+[\s\d]*)\s*ogłoszeń", text)
+#         if m:
+#             return int(m.group(1).replace(' ', ''))
+#         # wzorzec: liczba + "ofert"
+#         m2 = re.search(r"(\d+[\s\d]*)\s*ofert", text)
+#         if m2:
+#             return int(m2.group(1).replace(' ', ''))
+#
+#     # 2) Dla stron użytkowników: treść "Ogłoszenia użytkownika (123)"
+#     m3 = re.search(r"Ogłoszenia użytkownika\s*\((\d+)\)", html)
+#     if m3:
+#         return int(m3.group(1))
+#
+#     # 3) Fallback: regex na całości HTML, łapiemy pierwsze wystąpienie
+#     m4 = re.search(r"(\d+[\s\d]*)\s*(ogłoszeń|ofert)", html)
+#     if m4:
+#         return int(m4.group(1).replace(' ', ''))
+#
+#     print(f"Nie znaleziono liczby ogłoszeń dla: {shop_url}")
+#     return None
 
 
 # === ETAP 1: ZBIERANIE LINKÓW DO OGŁOSZEŃ ===
@@ -250,32 +258,27 @@ def extract_ad_links(driver, category_url, max_pages):
     print(f"⚡ Found {len(ad_links)} unique ads")
     return list(ad_links)
 
-# === ETAP 2: ZBIERANIE LINKÓW DO SKLEPÓW ===
+
 def extract_store_urls(driver, ad_links):
     store_urls = set()
+
     for ad in ad_links:
         print(f"🔗 Opening ad: {ad}")
-        driver.get(ad)
-        # Tu łączymy 2 koncepty
+
+        # get_shop_info_improved otworzy swoją własną przeglądarkę
         shop_info = get_shop_info_improved(ad)
+
+        # Użyj danych które znalazła funkcja!
+        if shop_info and 'profile_url' in shop_info:
+            store_urls.add(shop_info['profile_url'])
+
         print(f"   Typ: {shop_info.get('type', 'nieznany')}")
-        '''if shop_info:
-            print(f"\n📊 Podsumowanie:")
-            print(f"   Typ: {shop_info.get('type', 'nieznany')}")
-            print(f"   Nazwa: {shop_info.get('name', 'Nie znaleziono')}")
-            print(f"   Profil: {shop_info.get('profile_url', 'Brak')}")
-        else:
-            print("\n❌ Nie znaleziono informacji")'''
+
+        # Usuń stary kod który nic nie znajduje
+        # elems = driver.find_elements...
 
         time.sleep(1)
-        elems = driver.find_elements(
-            By.CSS_SELECTOR, "a[href*='-oferta.olx.pl']"
-        )
-        if elems:
-            href = elems[0].get_attribute('href').split('?')[0]
-            match = re.match(r"(https?://[\w\-]+-oferta\.olx\.pl)/?", href)
-            if match:
-                store_urls.add(match.group(1) + '/home/')
+
     print(f"⚡ Found {len(store_urls)} unique stores")
     return list(store_urls)
 
@@ -292,6 +295,28 @@ def main():
 
     finally:
         driver.quit()
+
+    # Upewnij się, że masz zainstalowane wymagane pakiety
+    try:
+        import pandas
+        import openpyxl
+    except ImportError:
+        print("Instaluję wymagane pakiety...")
+        import subprocess
+
+        subprocess.check_call(["pip", "install", "pandas", "openpyxl"])
+
+# Generuj nazwę pliku z datą i czasem
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = f"olx_sellers_{timestamp}.xlsx"
+
+    print(f"DEBUG: Przekazuję {len(store_urls)} URL-i do process_urls_to_xlsx")
+    if store_urls:
+        print(f"DEBUG: Przykładowy URL: {store_urls[0]}")
+    else:
+        print("DEBUG: Lista store_urls jest pusta!")
+    # Przetwórz URL-e i zapisz do XLSX
+    process_urls_to_xlsx(store_urls, output_file)
 
 if __name__ == '__main__':
     main()

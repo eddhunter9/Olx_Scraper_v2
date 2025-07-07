@@ -291,7 +291,7 @@ def ctc_get_olx_ads_count(shop_url):
 
     return None
 
-
+#Zmiana: results w argumencie zamiast urls
 def process_urls_to_xlsx(urls, output_filename="olx_sellers.xlsx"):
     """
     Przetwarza listę URL-i i zapisuje wyniki do XLSX
